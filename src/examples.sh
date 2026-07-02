@@ -3,9 +3,17 @@
 
 # -m: (set -o monitor) monitor mode
 set -em
+readonly LOG=${0}.log
+readonly PLOTCAKE=./plotcake
 
-[[ -z ${I} ]] && I=0.01
-[[ -z ${TMOUT} ]] && TMOUT=1s
+readonly LINE_TYPES=( $(${PLOTCAKE} --ltypes 2>/dev/null || true) )
+readonly LINE_TYPES_ARGS=( $(for t in ${LINE_TYPES[@]}; do echo "-L ${t}"; done) )
+
+readonly LINE_COLORS=( $(${PLOTCAKE} --lcolors 2>/dev/null || true) )
+readonly LINE_COLORS_ARGS=( $(for t in ${LINE_COLORS[@]}; do echo "-C ${t}"; done) )
+
+[[ -z ${I} ]] && I=0.001
+[[ -z ${TMOUT} ]] && TMOUT=200ms
 
 Interval=${I}
 
@@ -22,29 +30,58 @@ sigint() {
 }
 trap sigint INT
 
-line_types=( $(./plotcake -L nonsense 2>/dev/null || true) )
+_eval() {
+	eval "${@}"
+	echo "${@}" | tee --append ${LOG}
+}
 
 run() {
-	./plotcake ${args[@]} -I 10ms --interval=10ms "${@}"
+	_eval ${PLOTCAKE} ${args[@]} -I 10ms --interval=10ms "${@}"
 }
 
-stdin() {
-	while seq --separator=' ' 1 1 ${#line_types[@]}; do
+# $1: line number
+__stdin() {
+	local NUM=$1
+	shift
+	while seq --separator=' ' 1 1 ${NUM}; do
 		sleep ${Interval}
-	done | ./plotcake ${args[@]} "${@}"
+	done | _eval ${PLOTCAKE} ${args[@]} "${@}"
 }
+stdin() {
+	__stdin ${#LINE_TYPES[@]} "${@}"
+	__stdin ${#LINE_COLORS[@]} "${@}"
+}
+
+# __main__
+rm -f ${LOG}
+
+if [[ " ${LINE_TYPES[@]} " != " unicode-bold unicode-bold-dashed unicode-boldbold unicode unicode-dashed unicode-area-chart utf8 unicode-heart " ]]; then
+	echo >&2 "ERROR: lint types not match!"
+	exit 1
+fi
+
+if [[ " ${LINE_COLORS[@]} " != " green red cyan white magenta blue yellow " ]]; then
+	echo >&2 "ERROR: lint color not match!"
+	exit 1
+fi
 
 run -? --help
 run --usage
 run -V --version
 run -M --ram
+stdin --title 'test title' --xlabel XLABEL --ylabel YLABEL -C red -C red
+run ${LINE_TYPES_ARGS[@]} ${LINE_COLORS_ARGS[@]}
 run -o data
 run -f data.txt
+run --logarithmic
+run --logarithmic10
+run --exponential
 
 stdin -V --version
 stdin --usage
+stdin -? --help
 stdin --title 'test title' --xlabel XLABEL --ylabel YLABEL -C red -C red
-stdin $(for t in ${line_types[@]}; do echo "-L ${t}"; done)
+stdin ${LINE_TYPES_ARGS[@]} ${LINE_COLORS_ARGS[@]}
 stdin --logarithmic
 stdin --logarithmic10
 stdin --exponential
@@ -54,6 +91,6 @@ while true; do
 		seq --separator=' ' 1 1 $i
 		sleep ${Interval}
 	done
-done | ./plotcake ${args[@]}
+done | ${PLOTCAKE} ${args[@]}
 
 echo "Byebye"

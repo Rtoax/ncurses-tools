@@ -7,7 +7,7 @@
 #include <stdbool.h>
 #include "config.h"
 #include "keyboard.h"
-#include "value.h"
+#include "line.h"
 #include "utils.h"
 
 /**
@@ -47,6 +47,12 @@ struct plot {
 	 * viewing "Global Routes" in map software.
 	 */
 	int plotscaling;
+	/**
+	 * As the amount of data increases, we may need to view historical data.
+	 * @plotshift records the number of points moved to the left, and this
+	 * number of points will be scaled by @plotscaling.
+	 */
+	unsigned long plotshift;
 	struct {
 		int top, bottom, left, right;
 	} bnd, bnd_prev_max;
@@ -60,11 +66,12 @@ struct plot {
 	struct keyboard *kb;
 
 	/**
-	 * If this value is greater than the current time, help information
-	 * will be displayed.
+	 * Some information needs to be displayed for a longer time, so we set
+	 * a timeout.
 	 */
-	unsigned long help_expired_usec;
-	unsigned long llabel_expired_usec;
+	struct {
+		unsigned long help, llabel, shift;
+	} expired_usec;
 
 	/**
 	 * When something happens internally, such as a change in the drawing
@@ -73,12 +80,13 @@ struct plot {
 	 */
 	bool need_redraw;
 
-#define PLOT_INF0_FMT \
-	"plot(redraw=%ld, %.3f MiB, win[%d,%d], max[%d,%d], plot[%d,%d], scale %d)"
+#define PLOT_INF0_FMT                                                      \
+	"plot(redraw=%ld, %.3f MiB, win[%d,%d], max[%d,%d], plot[%d,%d], " \
+	"scale %d, shft %ld/%ld)"
 #define PLOT_INF0_ARG(p)                                                \
 	p->redrawcount, plot_mem_size(p) * 1. / 1024 / 1024, p->height, \
 		p->width, p->heightmax, p->widthmax, p->plotheight,     \
-		p->plotwidth, p->plotscaling
+		p->plotwidth, p->plotscaling, p->plotshift, plot_shift(p)
 };
 
 #define for_each_lgroup(plt, iter)                                       \
@@ -103,6 +111,25 @@ struct plot {
 			___p->plotscaling--;          \
 		}                                     \
 	} while (0)
+
+#define plot_shift_left(p)                            \
+	do {                                          \
+		struct plot *___p = (struct plot *)p; \
+		___p->plotshift++;                    \
+	} while (0)
+
+#define plot_shift_right(p)                           \
+	do {                                          \
+		struct plot *___p = (struct plot *)p; \
+		if (___p->plotshift >= 1)             \
+			___p->plotshift--;            \
+	} while (0)
+
+#define plot_shift(p)                                 \
+	({                                            \
+		struct plot *___p = (struct plot *)p; \
+		___p->plotshift * ___p->plotscaling;  \
+	})
 
 int plot_init(struct plot *p, struct keyboard *k, const char *file);
 unsigned long plot_mem_size(const struct plot *p);

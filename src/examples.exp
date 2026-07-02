@@ -11,17 +11,18 @@ log_file -noappend examples.exp.log
 set title "TITLE_XXX"
 set xlabel "LABEL_X"
 set ylabel "LABEL_Y"
-set line1 "LINE_LABEL_1"
+set line0 "LLABEL_0"
+set line1 "LLABEL_1"
 
-spawn bash -c "while sleep 0.1; do echo 1; done |
+spawn bash -c "while sleep 0.01; do echo 1 2; done |
 	./plotcake --title $title --xlabel $xlabel --ylabel $ylabel \
-		-l $line1 --verbose"
+		-l $line0 -l $line1 --verbose"
 sleep 0.1
 
 proc test_init {pattern} {
 	global timeout
 	expect {
-		-re "$pattern" {}
+		"$pattern" {}
 		timeout {
 			send_user "FATAL: not found pattern '$pattern'\n"
 			exit 1
@@ -29,41 +30,55 @@ proc test_init {pattern} {
 	}
 }
 
-proc test_key {key pattern success_msg} {
+proc test_key {key pattern} {
 	global timeout
 	send "$key"
 	expect {
-		-re "$pattern" {}
+		"$pattern" {}
 		timeout {
 			send_user "Fatal: key '$key' failed, expect '$pattern'\n"
 			exit 1
 		}
 	}
 	# Allow UI to refresh
-	sleep 0.5
+	sleep 0.05
 }
 
 # Verify initial plot
 test_init "$title"
 # test_init "$ylabel"
-test_init "$line1"
-test_init "redraw="
+test_init "$line0"
+test_init "plot(redraw="
+test_init "key(left="
+test_init "enter="
+test_init "github.com/rtoax/plotcake"
 
 # Verify keys
-test_key "l" " $line1" "check line labels"
-test_key "h" "'q' and Esc: quit" "check help"
-test_key "r" "cur=114=" "reset"
-test_key "t" "\(signed logarithmic transformation\)" "change curses type to log()"
-test_key "t" "\(base-10 signed logarithmic transformation\)" "change curses type to log10()"
-test_key "t" "\(base-e exponential\)" "change curses type to exp()"
+test_key "l" " $line0"
+test_key "l" " $line1"
+test_key "h" "'q': quit"
+test_key "r" "cur=114="
+test_key "t" "(signed logarithmic transformation)"
+test_key "t" "(base-10 signed logarithmic transformation)"
+test_key "t" "(base-e exponential)"
+# First enter
+test_key "\r" "1 "
+# Another enter
+test_key "\r" "cur=13="
 
-# Test enter
-#send "\r"
-#expect {
-#	"enter=1" { send_user "Success enter" }
-#	timeout { send_user "FATAL: key 'enter' failed\n"; exit 1 }
-#}
-#sleep .5
+test_key "\033" "cur=27="
+
+test_key "\033\[B" "cur=258="
+test_key "\033\[B" "KEY_DOWN"
+
+test_key "\033\[A" "cur=259="
+test_key "\033\[A" "KEY_UP"
+
+test_key "\033\[D" "cur=260="
+test_key "\033\[D" "KEY_LEFT"
+
+test_key "\033\[C" "cur=261="
+test_key "\033\[C" "KEY_RIGHT"
 
 send "q"
 expect eof

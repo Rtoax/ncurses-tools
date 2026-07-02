@@ -126,13 +126,14 @@ void __plot_warning(const struct plot *p, char *fmt, ...)
 }
 
 /**
+ * @start: start point of line.
+ * @len: number of value to plot.
  * @max and @min is original value, if use logarithmic, must convert it youself.
  */
-static void paint_line(struct plot *p, struct line *ln, double max, double min,
-		       bool debug)
+static void __paint_line(struct plot *p, struct line *ln, int start, int len,
+			 int shift, double max, double min, bool debug)
 {
 	int iv;
-	int nvs = (ln->count + p->plotscaling - 1) / p->plotscaling;
 	int prev_h = -1;
 	chtype color = flavor[ln->color];
 
@@ -154,36 +155,43 @@ static void paint_line(struct plot *p, struct line *ln, double max, double min,
 		break;
 	}
 
-	iv = 0;
+	const long ln_shift_count = ln->count - shift;
+	const int nvs = (ln_shift_count + p->plotscaling - 1) / p->plotscaling;
 
+	iv = -1;
 	for_each_value(ln, v)
 	{
-		double span = .0f, diff = .0f;
-		double plot_v = v->v;
-
-		int ivs = (iv + p->plotscaling - 1) / p->plotscaling;
-
+		iv++;
 		/**
 		 * The number of data points may be greater than the horizontal
 		 * size of the plotting area, so it is necessary to first skip
 		 * the data points that exceed the plotting area.
 		 *
-		 *     |------------------------| count
-		 *         |--------------------| plotwidth * plotscaling
+		 * line: |------------------------| line count
+		 *
+		 *                      <--shift--> plotshift * plotscaling
+		 *
+		 *       |--------------|           @ln_shift_count
+		 *
+		 * plot:        |=======|           plotwidth * plotscaling
+		 *
+		 *              ^ start
+		 *                      ^ start + len
 		 *
 		 *     ^^^^^ skip
 		 *
 		 * see also paint_lgroup().
 		 */
-		if (iv <= ln->count - p->plotwidth * p->plotscaling) {
-			iv++;
+		if (iv <= start || iv >= start + len) {
 			continue;
 		}
 
 		if (iv % p->plotscaling != 0) {
-			iv++;
 			continue;
 		}
+
+		double span = .0f, diff = .0f;
+		double plot_v = v->v;
 
 		if (p->v_scaling == NS_LOGARITHMIC)
 			plot_v = v->log_v;
@@ -199,6 +207,8 @@ static void paint_line(struct plot *p, struct line *ln, double max, double min,
 			diff = plot_v - min;
 			span = max - min;
 		}
+
+		int ivs = (iv + p->plotscaling - 1) / p->plotscaling;
 
 		int h = p->plotheight + p->bnd.top - 1 -
 			diff * (p->plotheight - 2) / span;
@@ -230,8 +240,6 @@ static void paint_line(struct plot *p, struct line *ln, double max, double min,
 
 		prev_h = h;
 
-		iv++;
-
 		/* set x axis */
 		if ((ivs - 1) % 10 == 0) {
 			char buf[10];
@@ -260,7 +268,7 @@ static void paint_line(struct plot *p, struct line *ln, double max, double min,
 
 		mvprintw(h, 0, "%s", sv);
 
-		if (iv + p->plotscaling > ln->count) {
+		if (iv + 1 + p->plotscaling > ln_shift_count) {
 			mvprintw(h, w + 1, "%s", ln->name);
 			nc = strlen(ln->name);
 			if (p->bnd_prev_max.right < nc)
@@ -313,6 +321,9 @@ void plot_draw_axes(const struct plot *p)
 static void paint_lgroup(struct plot *p, const struct lgroup *lg, bool debug)
 {
 	double max = -DBL_MAX, min = DBL_MAX;
+	int start = -1;
+	int len = p->plotwidth * p->plotscaling;
+	unsigned long shift = plot_shift(p);
 
 	/**
 	 * Since we are not drawing all the data for the entire curve, we need
@@ -324,9 +335,17 @@ static void paint_lgroup(struct plot *p, const struct lgroup *lg, bool debug)
 		if (l->count <= 0)
 			continue;
 
-		/* see also line count and plotwidth check in paint_line() */
-		int len = p->plotwidth * p->plotscaling;
-		int start = l->count - len;
+		/**
+		 * If the amount of data is insufficient to fill a screen, then
+		 * @shift is meaningless, so clear it.
+		 */
+		const int _nvs =
+			(l->count + p->plotscaling - 1) / p->plotscaling;
+		if (p->plotwidth > _nvs) {
+			p->plotshift = shift = 0;
+		}
+
+		start = l->count - len - shift;
 
 		double _max = line_range_max(l, start, len);
 		double _min = line_range_min(l, start, len);
@@ -338,7 +357,7 @@ static void paint_lgroup(struct plot *p, const struct lgroup *lg, bool debug)
 	{
 		if (l->count <= 0)
 			continue;
-		paint_line(p, l, max, min, debug);
+		__paint_line(p, l, start, len, shift, max, min, debug);
 	}
 
 	if (debug && lg->ops->plot_debug)
@@ -348,7 +367,7 @@ static void paint_lgroup(struct plot *p, const struct lgroup *lg, bool debug)
 /**
  * need erase() before, refresh() after
  */
-static void paint_plot(struct plot *p, bool debug)
+static void __paint_plot(struct plot *p, bool debug)
 {
 	plot_draw_title(p);
 	plot_draw_axes(p);
@@ -404,18 +423,23 @@ static void __plot_redraw(struct plot *p, bool debug)
 	 */
 	exec_key_handler(p->kb->current_key);
 
-	paint_plot(p, debug);
+	__paint_plot(p, debug);
 
-	if (p->help_expired_usec && p->help_expired_usec > usecs()) {
+	if (p->expired_usec.help && p->expired_usec.help > usecs()) {
 		plot_help(p);
 	} else {
-		p->help_expired_usec = 0;
+		p->expired_usec.help = 0;
 	}
 
-	if (p->llabel_expired_usec && p->llabel_expired_usec > usecs()) {
+	if (p->expired_usec.llabel && p->expired_usec.llabel > usecs()) {
 		plot_llabel(p);
 	} else {
-		p->llabel_expired_usec = 0;
+		p->expired_usec.llabel = 0;
+	}
+
+	if (p->expired_usec.shift && p->expired_usec.shift < usecs()) {
+		p->plotshift = 0;
+		p->expired_usec.shift = 0;
 	}
 
 	refresh();
@@ -450,7 +474,7 @@ void plot_help(const struct plot *p)
 
 	attron(flavor[C_BLUE] | A_BOLD);
 	for (int i = n - 1; i >= 0; i--)
-		mvprintw(h - i, w, key_helps[n - i - 1]);
+		mvprintw(h - i, w, "%s", key_helps[n - i - 1]);
 	attroff(flavor[C_BLUE] | A_BOLD);
 }
 
@@ -490,7 +514,7 @@ void plot_llabel(const struct plot *p)
 static void key_h(int key, void *arg)
 {
 	struct plot *p = arg;
-	p->help_expired_usec = usecs() + 10e6;
+	p->expired_usec.help = usecs() + EXPIRED_USECS_HELP;
 	plot_help(p);
 }
 
@@ -500,7 +524,7 @@ static void key_h(int key, void *arg)
 static void key_l(int key, void *arg)
 {
 	struct plot *p = arg;
-	p->llabel_expired_usec = usecs() + 10e6;
+	p->expired_usec.llabel = usecs() + EXPIRED_USECS_LLABEL;
 	plot_llabel(p);
 }
 
@@ -512,8 +536,36 @@ static void key_r(int key, void *arg)
 	struct plot *p = arg;
 
 	plot_scaling_init(p);
-	p->help_expired_usec = 0;
-	p->llabel_expired_usec = 0;
+	p->expired_usec.help = 0;
+	p->expired_usec.llabel = 0;
+	p->expired_usec.shift = 0;
+	p->plotshift = 0;
+}
+
+static void key_up(int key, void *arg)
+{
+	plot_scaling_up(arg);
+}
+
+static void key_down(int key, void *arg)
+{
+	plot_scaling_down(arg);
+}
+
+static void key_left(int key, void *arg)
+{
+	struct plot *p = arg;
+	/* 10 seconds */
+	p->expired_usec.shift = usecs() + EXPIRED_USECS_SHIFT;
+	plot_shift_left(p);
+}
+
+static void key_right(int key, void *arg)
+{
+	struct plot *p = arg;
+	/* 10 seconds */
+	p->expired_usec.shift = usecs() + EXPIRED_USECS_SHIFT;
+	plot_shift_right(p);
 }
 
 int plot_init(struct plot *p, struct keyboard *kb, const char *file)
@@ -529,6 +581,10 @@ int plot_init(struct plot *p, struct keyboard *kb, const char *file)
 	register_key_handler('r', p, key_r);
 	register_key_handler('h', p, key_h);
 	register_key_handler('l', p, key_l);
+	register_key_handler(KEY_UP, p, key_up);
+	register_key_handler(KEY_DOWN, p, key_down);
+	register_key_handler(KEY_RIGHT, p, key_right);
+	register_key_handler(KEY_LEFT, p, key_left);
 
 	if (file)
 		err = err ?: load_plot(p, file);

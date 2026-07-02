@@ -30,7 +30,7 @@
 #include "file.h"
 #include "load.h"
 #include "keyboard.h"
-#include "value.h"
+#include "line.h"
 #include "plot.h"
 #include "ram.h"
 #include "stdin.h"
@@ -39,6 +39,8 @@ enum {
 	ARG_LOGARITHMIC = 200,
 	ARG_LOGARITHMIC10,
 	ARG_EXPONENTIAL,
+	ARG_LINE_TYPES,
+	ARG_LINE_COLORS,
 };
 
 const char argp_prog_doc[] = ANSI_BOLD
@@ -82,11 +84,15 @@ static const struct argp_option opts[] = {
 	  "Specify line label (may be listed multiple times)" },
 	{ "ltype", 'L', "TYPE", 0,
 	  "Specify line types, if an invalid value is entered, the supported "
-	  "line types will be listed (may be listed multiple times)" },
+	  "line types will be listed or use --ltypes show all types supported "
+	  "(may be listed multiple times)" },
+	{ "ltypes", ARG_LINE_TYPES, NULL, 1, "show line types for --ltype" },
 	{ "lcolor", 'C', "COLOR", 0,
 	  "Specify line colors, if an invalid value is entered, the supported "
 	  "line colors will be listed, can match color prefixes, such as 'r' "
 	  "matching 'red' (may be listed multiple times)" },
+	{ "lcolors", ARG_LINE_COLORS, NULL, 1,
+	  "show line colors for --lcolor" },
 	{ "ram", 'M', NULL, 1, "Display memory instead of loadavg" },
 	{ "interval", 'I', "SEC", 0,
 	  "Specify interval time, the default unit is nanoseconds, but units "
@@ -190,6 +196,14 @@ static error_t parse_arg(int opt, char *arg, struct argp_state *state)
 		break;
 	case ARG_LOGARITHMIC10:
 		plot.v_scaling = NS_LOGARITHMIC10;
+		break;
+	case ARG_LINE_TYPES:
+		ldraw_print_names(stdout);
+		exit(EXIT_SUCCESS);
+		break;
+	case ARG_LINE_COLORS:
+		color_print_names(stdout);
+		exit(EXIT_SUCCESS);
 		break;
 	case 'I':
 		interval_nsecs = str2nsecs(arg);
@@ -331,20 +345,6 @@ int main(int argc, char *argv[])
 
 	/* curses start from here */
 
-	/**
-	 * In ncurses, the biggest difficulty in detecting a single press of the
-	 * Esc key directly is that the Esc key, besides being a key itself, is
-	 * also the starting byte of all escape sequences (such as arrow keys).
-	 *
-	 * To avoid confusion, ncurses, upon detecting the Esc key, briefly
-	 * waits to see if there are any subsequent characters. This process
-	 * (usually about 1 second) causes a sense of 'delay'.
-	 *
-	 * Another method is to set the environment variable with the same name,
-	 * ESCDELAY=50.
-	 */
-	set_escdelay(50);
-
 	initscr();
 	cbreak();
 	noecho();
@@ -452,16 +452,13 @@ int main(int argc, char *argv[])
 					break;
 				case KEY_UP:
 					plot.kb->cnt.up++;
-					plot_scaling_up(&plot);
 					redraw = true;
 					break;
 				case KEY_DOWN:
 					plot.kb->cnt.down++;
-					plot_scaling_down(&plot);
 					redraw = true;
 					break;
 				case 'q': /* quit */
-				case 27: /* Esc */
 					broadcast_sig(SIGINT);
 					goto end;
 					break;
@@ -488,6 +485,13 @@ int main(int argc, char *argv[])
 					plot.kb->cnt.l++;
 					redraw = true;
 					break;
+				/**
+				 * Sometimes, the arrow keys can accidentally
+				 * trigger Esc, which causes the program to
+				 * exit, so plotcake should ignore the Esc key
+				 * like the 'top' command.
+				 */
+				case 27: /* Esc, 0x1B, 033, ^[ */
 				case 13: /* enter */
 					plot.kb->cnt.enter++;
 					redraw = true;

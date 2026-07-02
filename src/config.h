@@ -2,12 +2,12 @@
 /* Copyright (C) 2026 Rong Tao */
 #pragma once
 
-#define MY_VERSION "v1.5.5"
+#define MY_VERSION "v1.5.12"
 #define GIT_REPO "github.com/rtoax/plotcake"
 
 #define KEY_HELP_h "'h': show the help info"
 #define KEY_HELP_l "'l': show the label for each line"
-#define KEY_HELP_q "'q' and Esc: quit"
+#define KEY_HELP_q "'q': quit"
 #define KEY_HELP_r "'r': reset plot"
 #define KEY_HELP_t "'t': change numerical scaling for paint"
 #define KEY_HELP_v "'v': turn on/off the verbose mode"
@@ -16,6 +16,10 @@
 #define KEY_HELP_DOWN "Down: Uniform Scaling Down"
 #define KEY_HELP_LEFT "Left: Curve shifts to the right (todo)"
 #define KEY_HELP_RIGHT "Right: Curve shifts to the left (todo)"
+
+#define EXPIRED_USECS_SHIFT 60000000UL /* key left, right */
+#define EXPIRED_USECS_HELP 1000000UL /* key h */
+#define EXPIRED_USECS_LLABEL 1000000UL /* key l */
 
 #define ANSI_RED "\033[1;31m"
 #define ANSI_GREEN "\033[1;32m"
