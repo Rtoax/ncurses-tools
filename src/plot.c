@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: (LGPL-2.1 OR BSD-2-Clause)
 /* Copyright (C) 2026 Rong Tao */
 #include <assert.h>
+#include <errno.h>
 #include <ctype.h>
 #include <float.h>
 #include <math.h>
@@ -10,13 +11,11 @@
 #include "plot.h"
 #include "keyboard.h"
 
-chtype flavor[C_MAX] = { 0 };
+chtype colors[C_MAX] = { 0 };
 static const char *verstring = GIT_REPO " " MY_VERSION;
 
 int plot_add_lgroup(struct plot *p, struct lgroup *lg, void *lg_ops_arg)
 {
-	assert(lg->ops->create && "lgroup ops is not set, set it first");
-
 	if (!p->lghead) {
 		p->lghead = lg;
 		p->lgcount = 1;
@@ -27,7 +26,11 @@ int plot_add_lgroup(struct plot *p, struct lgroup *lg, void *lg_ops_arg)
 	p->lgtail = lg;
 	lg->plot = p;
 	lg->id = p->lgcount;
-	lg->ops->arg = lg_ops_arg;
+	if (lg->ops) {
+		lg->ops->arg = lg_ops_arg;
+	}
+
+	assert(!(!lg->ops && lg_ops_arg) && "not allow none-ops with ops arg");
 	return 0;
 }
 
@@ -48,7 +51,7 @@ void init_flavor(void)
 		start_color();
 #define SET_COLOR(num, fg)                        \
 	init_pair(num + 1, (short)fg, (short)bg); \
-	flavor[num] |= (chtype)COLOR_PAIR(num + 1)
+	colors[num] |= (chtype)COLOR_PAIR(num + 1)
 
 		SET_COLOR(C_GREEN, COLOR_GREEN);
 		SET_COLOR(C_RED, COLOR_RED);
@@ -59,6 +62,11 @@ void init_flavor(void)
 		SET_COLOR(C_YELLOW, COLOR_YELLOW);
 #undef SET_COLOR
 	}
+}
+
+chtype getflavor(enum lcolor_enum color)
+{
+	return colors[color];
 }
 
 void plot_update_size(struct plot *p, bool init)
@@ -120,9 +128,9 @@ void __plot_warning(const struct plot *p, char *fmt, ...)
 	va_start(va, fmt);
 	vsnprintf(buff, 256, fmt, va);
 	va_end(va);
-	attron(flavor[C_RED] | A_BOLD);
+	attron(colors[C_RED] | A_BOLD);
 	mvaddstr(p->height / 2, (p->width - strlen(buff)) / 2, buff);
-	attroff(flavor[C_RED] | A_BOLD);
+	attroff(colors[C_RED] | A_BOLD);
 }
 
 /**
@@ -130,27 +138,29 @@ void __plot_warning(const struct plot *p, char *fmt, ...)
  * @len: number of value to plot.
  * @max and @min is original value, if use logarithmic, must convert it youself.
  */
-static void __paint_line(struct plot *p, struct line *ln, int start, int len,
-			 int shift, double max, double min, bool debug)
+static void __paint_line(struct plot *p, const struct lgroup *lg,
+			 const struct line *ln, int start, int len, int shift,
+			 double max, double min, bool debug)
 {
 	int iv;
 	int prev_h = -1;
-	chtype color = flavor[ln->color];
+	chtype color = colors[ln->color];
 
-	switch (p->v_scaling) {
-	case NS_LOGARITHMIC:
+	switch (p->curve_type) {
+	case CURVE_TYPE_LOGARITHMIC:
 		max = signed_log_trans(max);
 		min = signed_log_trans(min);
 		break;
-	case NS_LOGARITHMIC10:
+	case CURVE_TYPE_LOGARITHMIC10:
 		max = signed_log10_trans(max);
 		min = signed_log10_trans(min);
 		break;
-	case NS_EXPONENTIAL:
+	case CURVE_TYPE_EXPONENTIAL:
 		max = exp(max);
 		min = exp(min);
 		break;
-	case NS_NONE:
+	case CURVE_TYPE_DELTA:
+	case CURVE_TYPE_NONE:
 	default:
 		break;
 	}
@@ -193,12 +203,20 @@ static void __paint_line(struct plot *p, struct line *ln, int start, int len,
 		double span = .0f, diff = .0f;
 		double plot_v = v->v;
 
-		if (p->v_scaling == NS_LOGARITHMIC)
+		if (p->curve_type == CURVE_TYPE_LOGARITHMIC)
 			plot_v = v->log_v;
-		else if (p->v_scaling == NS_LOGARITHMIC10)
+		else if (p->curve_type == CURVE_TYPE_LOGARITHMIC10)
 			plot_v = v->log10_v;
-		else if (p->v_scaling == NS_EXPONENTIAL)
+		else if (p->curve_type == CURVE_TYPE_EXPONENTIAL)
 			plot_v = v->exp_v;
+		else if (p->curve_type == CURVE_TYPE_DELTA) {
+			plot_v = delta_v(v);
+			/* touch the end of line */
+			if (isnan(plot_v)) {
+				iv = ln_shift_count;
+				goto print_llabel;
+			}
+		}
 
 		if (max == min || max == 0.0 || max < min) {
 			diff = 0;
@@ -248,26 +266,32 @@ static void __paint_line(struct plot *p, struct line *ln, int start, int len,
 		}
 
 		/* set y axis */
-		attron(color);
 		char sv[64];
 		int nc;
 
-		if (p->v_scaling == NS_LOGARITHMIC)
+		if (p->curve_type == CURVE_TYPE_LOGARITHMIC)
 			nc = snprintf(sv, 64, "s*log(1+|%.3f|)=%.3f", v->v,
 				      plot_v);
-		else if (p->v_scaling == NS_LOGARITHMIC10)
+		else if (p->curve_type == CURVE_TYPE_LOGARITHMIC10)
 			nc = snprintf(sv, 64, "s*log10(1+|%.3f|)=%.3f", v->v,
 				      plot_v);
-		else if (p->v_scaling == NS_EXPONENTIAL)
+		else if (p->curve_type == CURVE_TYPE_EXPONENTIAL)
 			nc = snprintf(sv, 64, "exp(%.3f)=%.3f", v->v, plot_v);
+		else if (p->curve_type == CURVE_TYPE_DELTA)
+			nc = snprintf(sv, 64, "delta(%.3f-%.3f)=%.3f",
+				      v->next->v, v->v, plot_v);
 		else
 			nc = snprintf(sv, 64, "%.3f", plot_v);
 
 		if (p->bnd_prev_max.left < nc)
 			p->bnd_prev_max.left = nc;
 
+		attron(color);
 		mvprintw(h, 0, "%s", sv);
+		attroff(color);
 
+print_llabel:
+		attron(color);
 		if (iv + 1 + p->plotscaling > ln_shift_count) {
 			mvprintw(h, w + 1, "%s", ln->name);
 			nc = strlen(ln->name);
@@ -284,24 +308,29 @@ static void __paint_line(struct plot *p, struct line *ln, int start, int len,
 	}
 }
 
-void plot_draw_title(const struct plot *p)
+static void __draw_title(const struct plot *p)
 {
-	char buf[128], *title = buf;
-	if (p->v_scaling == NS_LOGARITHMIC)
-		snprintf(buf, 128, "%s (signed logarithmic transformation)",
-			 p->title);
-	else if (p->v_scaling == NS_LOGARITHMIC10)
-		snprintf(buf, 128,
+	char buf[sizeof(p->title) + 128];
+	char *title = buf;
+
+	if (p->curve_type == CURVE_TYPE_LOGARITHMIC)
+		snprintf(buf, sizeof(buf),
+			 "%s (signed logarithmic transformation)", p->title);
+	else if (p->curve_type == CURVE_TYPE_LOGARITHMIC10)
+		snprintf(buf, sizeof(buf),
 			 "%s (base-10 signed logarithmic transformation)",
 			 p->title);
-	else if (p->v_scaling == NS_EXPONENTIAL)
-		snprintf(buf, 128, "%s (base-e exponential)", p->title);
+	else if (p->curve_type == CURVE_TYPE_EXPONENTIAL)
+		snprintf(buf, sizeof(buf), "%s (base-e exponential)", p->title);
+	else if (p->curve_type == CURVE_TYPE_DELTA)
+		snprintf(buf, sizeof(buf), "%s (delta)", p->title);
 	else
-		title = p->title;
+		title = (char *)p->title;
+
 	mvaddstr(0, (p->width - strlen(title)) / 2, title);
 }
 
-void plot_draw_axes(const struct plot *p)
+static void __draw_axes(const struct plot *p)
 {
 	mvhline(p->plotheight + p->bnd.top, p->bnd.left, T_HLINE, p->plotwidth);
 	mvvline(p->bnd.top, p->bnd.left, T_VLINE, p->plotheight);
@@ -309,13 +338,11 @@ void plot_draw_axes(const struct plot *p)
 
 	mvaddch(p->bnd.top, p->bnd.left, T_UARR);
 	mvprintw(p->bnd.top, p->bnd.left, U25B2);
-	if (p->label_y)
-		mvaddstr(p->bnd.top - 1, p->bnd.left, p->label_y);
+	mvaddstr(p->bnd.top - 1, p->bnd.left, p->label_y);
 
 	mvprintw(p->plotheight + p->bnd.top, p->plotwidth + p->bnd.left, U25BA);
-	if (p->label_x)
-		mvaddstr(p->plotheight + p->bnd.top + 1,
-			 p->plotwidth + p->bnd.left, p->label_x);
+	mvaddstr(p->plotheight + p->bnd.top + 1, p->plotwidth + p->bnd.left,
+		 p->label_x);
 }
 
 static void paint_lgroup(struct plot *p, const struct lgroup *lg, bool debug)
@@ -347,8 +374,16 @@ static void paint_lgroup(struct plot *p, const struct lgroup *lg, bool debug)
 
 		start = l->count - len - shift;
 
-		double _max = line_range_max(l, start, len);
-		double _min = line_range_min(l, start, len);
+		double _max, _min;
+		if (p->curve_type == CURVE_TYPE_DELTA) {
+			_max = line_range_delta_max(l, start, p->plotscaling,
+						    len);
+			_min = line_range_delta_min(l, start, p->plotscaling,
+						    len);
+		} else {
+			_max = line_range_max(l, start, p->plotscaling, len);
+			_min = line_range_min(l, start, p->plotscaling, len);
+		}
 		max = max < _max ? _max : max;
 		min = min > _min ? _min : min;
 	}
@@ -357,11 +392,33 @@ static void paint_lgroup(struct plot *p, const struct lgroup *lg, bool debug)
 	{
 		if (l->count <= 0)
 			continue;
-		__paint_line(p, l, start, len, shift, max, min, debug);
+		__paint_line(p, lg, l, start, len, shift, max, min, debug);
 	}
 
-	if (debug && lg->ops->plot_debug)
+	if (debug && lg->ops && lg->ops->plot_debug)
 		lg->ops->plot_debug(lg, lg->ops->arg);
+}
+
+void __plot_debug_llabel(const struct lgroup *lg, int height)
+{
+	int i = 0;
+	struct plot *p = lg->plot;
+
+	for_each_line(lg, ln)
+	{
+		chtype color = getflavor(ln->color);
+		attron(color);
+		if (ln->count <= 0)
+			mvprintw(i + height, p->bnd.left + 1, "%d: %s: %ld",
+				 ln->id, ln->name, ln->count);
+		else
+			mvprintw(i + height, p->bnd.left + 1,
+				 "%d: %s: %ld %f - %lf~%lf", ln->id, ln->name,
+				 ln->count, ln->tail->v, ln->min->v,
+				 ln->max->v);
+		attroff(color);
+		i++;
+	}
 }
 
 /**
@@ -369,8 +426,8 @@ static void paint_lgroup(struct plot *p, const struct lgroup *lg, bool debug)
  */
 static void __paint_plot(struct plot *p, bool debug)
 {
-	plot_draw_title(p);
-	plot_draw_axes(p);
+	__draw_title(p);
+	__draw_axes(p);
 
 	for_each_lgroup(p, lg)
 	{
@@ -395,19 +452,33 @@ static void __paint_plot(struct plot *p, bool debug)
 	move(0, 0);
 }
 
-void plot_create_data(struct plot *p)
+/**
+ * return the number of lines be created.
+ */
+int plot_create_lines(struct plot *p)
 {
+	int err = 0, n = 0;
 	for_each_lgroup(p, lg)
 	{
-		lg->ops->create(lg, lg->ops->arg);
+		if (!lg->ops || !lg->ops->create_lines)
+			continue;
+		err = lg->ops->create_lines(lg, lg->ops->arg);
+		if (n < 0) {
+			err = n;
+			break;
+		} else if (n > 0)
+			n += err;
 	}
+	return err;
 }
 
 void plot_update_data(struct plot *p)
 {
 	for_each_lgroup(p, lg)
 	{
-		lg->ops->update(lg, lg->ops->arg);
+		if (!lg->ops || !lg->ops->update_data)
+			continue;
+		lg->ops->update_data(lg, lg->ops->arg);
 	}
 }
 
@@ -421,7 +492,7 @@ static void __plot_redraw(struct plot *p, bool debug)
 	/**
 	 * Handle the keyboard first, because 'reset' need before paint.
 	 */
-	exec_key_handler(p->kb->current_key);
+	exec_key_handler(p->kb, p->kb->current_key);
 
 	__paint_plot(p, debug);
 
@@ -472,10 +543,10 @@ void plot_help(const struct plot *p)
 	int w = p->bnd.left + 1;
 	int n = sizeof(key_helps) / sizeof(key_helps[0]);
 
-	attron(flavor[C_BLUE] | A_BOLD);
+	attron(colors[C_BLUE] | A_BOLD);
 	for (int i = n - 1; i >= 0; i--)
 		mvprintw(h - i, w, "%s", key_helps[n - i - 1]);
-	attroff(flavor[C_BLUE] | A_BOLD);
+	attroff(colors[C_BLUE] | A_BOLD);
 }
 
 void plot_llabel(const struct plot *p)
@@ -498,11 +569,11 @@ void plot_llabel(const struct plot *p)
 			int hi = h - nline + i + 1;
 			const int n = 6;
 
-			attron(flavor[ln->color] | A_BOLD);
+			attron(colors[ln->color] | A_BOLD);
 			for (int x = 0; x < n; x++)
 				ln->ops->horizon(ln, hi, w + x);
 			mvprintw(hi, w + n + 1, " %s", ln->name);
-			attroff(flavor[ln->color] | A_BOLD);
+			attroff(colors[ln->color] | A_BOLD);
 			i++;
 		}
 	}
@@ -511,27 +582,29 @@ void plot_llabel(const struct plot *p)
 /**
  * Press key 'h', display the help info
  */
-static void key_h(int key, void *arg)
+static int key_h(int key, void *arg)
 {
 	struct plot *p = arg;
 	p->expired_usec.help = usecs() + EXPIRED_USECS_HELP;
 	plot_help(p);
+	return 0;
 }
 
 /**
  * Press key 'l', display the label for each line.
  */
-static void key_l(int key, void *arg)
+static int key_l(int key, void *arg)
 {
 	struct plot *p = arg;
 	p->expired_usec.llabel = usecs() + EXPIRED_USECS_LLABEL;
 	plot_llabel(p);
+	return 0;
 }
 
 /**
  * Press key 'r', reset plot
  */
-static void key_r(int key, void *arg)
+static int key_r(int key, void *arg)
 {
 	struct plot *p = arg;
 
@@ -540,37 +613,55 @@ static void key_r(int key, void *arg)
 	p->expired_usec.llabel = 0;
 	p->expired_usec.shift = 0;
 	p->plotshift = 0;
+	return 0;
 }
 
-static void key_up(int key, void *arg)
+/**
+ * Press key 't', change curve type
+ */
+static int key_t(int key, void *arg)
+{
+	struct plot *p = arg;
+	p->curve_type = (p->curve_type + 1) % CURVE_TYPE_MAX;
+	return 0;
+}
+
+static int key_up(int key, void *arg)
 {
 	plot_scaling_up(arg);
+	return 0;
 }
 
-static void key_down(int key, void *arg)
+static int key_down(int key, void *arg)
 {
 	plot_scaling_down(arg);
+	return 0;
 }
 
-static void key_left(int key, void *arg)
+static int key_left(int key, void *arg)
 {
 	struct plot *p = arg;
 	/* 10 seconds */
 	p->expired_usec.shift = usecs() + EXPIRED_USECS_SHIFT;
 	plot_shift_left(p);
+	return 0;
 }
 
-static void key_right(int key, void *arg)
+static int key_right(int key, void *arg)
 {
 	struct plot *p = arg;
 	/* 10 seconds */
 	p->expired_usec.shift = usecs() + EXPIRED_USECS_SHIFT;
 	plot_shift_right(p);
+	return 0;
 }
 
-int plot_init(struct plot *p, struct keyboard *kb, const char *file)
+int plot_init(struct plot *p, struct keyboard *kb, const char *file, bool debug)
 {
 	int err = 0;
+
+	if (!p || !kb)
+		return -EINVAL;
 
 	memset(p, 0, sizeof(struct plot));
 
@@ -578,16 +669,17 @@ int plot_init(struct plot *p, struct keyboard *kb, const char *file)
 
 	p->kb = kb;
 
-	register_key_handler('r', p, key_r);
-	register_key_handler('h', p, key_h);
-	register_key_handler('l', p, key_l);
-	register_key_handler(KEY_UP, p, key_up);
-	register_key_handler(KEY_DOWN, p, key_down);
-	register_key_handler(KEY_RIGHT, p, key_right);
-	register_key_handler(KEY_LEFT, p, key_left);
+	err = err ?: register_key_handler(kb, 'r', p, key_r);
+	err = err ?: register_key_handler(kb, 't', p, key_t);
+	err = err ?: register_key_handler(kb, 'h', p, key_h);
+	err = err ?: register_key_handler(kb, 'l', p, key_l);
+	err = err ?: register_key_handler(kb, KEY_UP, p, key_up);
+	err = err ?: register_key_handler(kb, KEY_DOWN, p, key_down);
+	err = err ?: register_key_handler(kb, KEY_RIGHT, p, key_right);
+	err = err ?: register_key_handler(kb, KEY_LEFT, p, key_left);
 
-	if (file)
-		err = err ?: load_plot(p, file);
+	if (file && !err)
+		err = err ?: load_plot(p, file, debug);
 
 	return err;
 }

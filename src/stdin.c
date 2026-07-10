@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0
 // Copyright (C) 2026 Rong Tao
 #include <ctype.h>
+#include <errno.h>
 #include <unistd.h>
 #include <malloc.h>
 #include <stdlib.h>
@@ -18,28 +19,36 @@ static char *skip(char *buf)
 	return buf;
 }
 
-static void __add_line(struct lgroup *lg, int i)
+static int __add_line(struct lgroup *lg, int i)
 {
 	char name[64] = { 0 };
 	snprintf(name, 64, "line%d", i);
-	enum lcolor_enum color = nextcolor(i);
+	enum lcolor_enum color = nextlcolor(i);
 
 	if (i < get_nr_ltypes())
-		new_line(lg, name, color);
+		return new_line(lg, name, color) ? 0 : -EEXIST;
 	else {
 		int idx = (i - get_nr_ltypes()) / C_MAX;
 		idx %= LINE_TYPE_MAX;
-		new_line_ops(lg, name, color, ldraw_type2ops(idx));
+		return new_line_ops(lg, name, color, ltype_type2ops(idx)) ?
+			       0 :
+			       -EEXIST;
 	}
 }
 
-static void stdin_create(struct lgroup *lg, void *arg)
+static int stdin_create_lines(struct lgroup *lg, void *arg)
 {
-	int i;
+	int i, err = 0, n = 0;
 	struct stdin_arg *a = arg;
 
-	for (i = 0; i < a->nline; i++)
-		__add_line(lg, i);
+	for (i = 0; i < a->nline; i++) {
+		err = __add_line(lg, i);
+		if (err < 0)
+			return err;
+		else
+			n++;
+	}
+	return n;
 }
 
 static void __stdin_add_data(struct lgroup *lg, struct stdin_arg *a, char *buf)
@@ -88,7 +97,7 @@ static void __stdin_add_data(struct lgroup *lg, struct stdin_arg *a, char *buf)
 	free(values);
 }
 
-static void __stdin_update(struct lgroup *lg, struct stdin_arg *a)
+static void __stdin_update_data(struct lgroup *lg, struct stdin_arg *a)
 {
 	char *buf = strdup(a->line_buff);
 
@@ -115,16 +124,15 @@ static void __stdin_update(struct lgroup *lg, struct stdin_arg *a)
 	free(buf);
 }
 
-static void stdin_update(struct lgroup *lg, void *arg)
+static void stdin_update_data(struct lgroup *lg, void *arg)
 {
-	__stdin_update(lg, arg);
+	__stdin_update_data(lg, arg);
 }
 
 static void stdin_plot_debug(const struct lgroup *lg, void *arg)
 {
 	struct stdin_arg *a = arg;
 	struct plot *p = lg->plot;
-	int i;
 	char *buf = strdup(a->line_buff);
 	char *s = buf;
 
@@ -139,33 +147,26 @@ static void stdin_plot_debug(const struct lgroup *lg, void *arg)
 		s++;
 	}
 
-	mvprintw(2, p->bnd.left + 1, "lgroup cnt %d, arg nline %d", lg->count,
-		 a->nline);
-	mvprintw(3, p->bnd.left + 1, "stdin: '%s'", buf);
+	mvprintw(p->bnd.top + 1, p->bnd.left + 1, "lgroup cnt %d, arg nline %d",
+		 lg->count, a->nline);
+	mvprintw(p->bnd.top + 2, p->bnd.left + 1, "stdin: '%s'", buf);
 
-	i = 0;
-	for_each_line(lg, ln)
-	{
-		if (ln->count <= 0)
-			mvprintw(i + 4, p->bnd.left + 1, "%s: %d %ld", ln->name,
-				 ln->id, ln->count);
-		else
-			mvprintw(i + 5, p->bnd.left + 1,
-				 "%s: %d %ld %f - %lf~%lf", ln->name, ln->id,
-				 ln->count, ln->tail->v, ln->min->v,
-				 ln->max->v);
-		i++;
-	}
+	__plot_debug_llabel(lg, p->bnd.top + 4);
+
 	free(buf);
 }
 
 static struct lgroup_operations stdin_ops = {
-	.create = stdin_create,
-	.update = stdin_update,
+	.create_lines = stdin_create_lines,
+	.update_data = stdin_update_data,
 	.plot_debug = stdin_plot_debug,
 };
 
 struct lgroup lg_stdin = {
 	.name = "stdin",
 	.ops = &stdin_ops,
+};
+
+struct lgroup lg_stdin_no_ops = {
+	.name = "stdin",
 };

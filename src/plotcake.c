@@ -28,7 +28,7 @@
 #include <ncurses.h>
 #include <unistd.h>
 #include "file.h"
-#include "load.h"
+#include "loadavg.h"
 #include "keyboard.h"
 #include "line.h"
 #include "plot.h"
@@ -39,6 +39,7 @@ enum {
 	ARG_LOGARITHMIC = 200,
 	ARG_LOGARITHMIC10,
 	ARG_EXPONENTIAL,
+	ARG_DELTA,
 	ARG_LINE_TYPES,
 	ARG_LINE_COLORS,
 };
@@ -105,6 +106,8 @@ static const struct argp_option opts[] = {
 	  "different (shortcut " KEY_HELP_t ")" },
 	{ "exponential", ARG_EXPONENTIAL, NULL, 1,
 	  "Use base-e exponential (shortcut " KEY_HELP_t ")" },
+	{ "delta", ARG_DELTA, NULL, 1,
+	  "Use delta value (shortcut " KEY_HELP_t ")" },
 	{ "tmout", 't', "SEC", 0,
 	  "Specify timeout time, the default unit is nanoseconds, but units "
 	  "such as 's', 'ms', 'us', and 'ns' can also be used." },
@@ -134,6 +137,7 @@ static char *file = NULL;
 static char *title = NULL;
 static char *xlabel = NULL;
 static char *ylabel = NULL;
+static enum curve_type curve_type = CURVE_TYPE_NONE;
 
 struct plot plot = { 0 };
 struct keyboard keyboard = { 0 };
@@ -158,22 +162,24 @@ void broadcast_sig(int signo)
 
 static error_t parse_arg(int opt, char *arg, struct argp_state *state)
 {
+	int err = 0;
+
 	switch (opt) {
 	case 'T':
 		title = arg;
 		break;
 	case 'l':
-		enqueue_llabel(arg);
+		err = err ?: enqueue_llabel(arg);
 		break;
 	case 'L':
-		if (!ldraw_hasname(arg))
-			exit(EXIT_FAILURE);
-		enqueue_ltype(ldraw_name2type(arg));
+		if (!ltype_hasname(arg))
+			err = -EINVAL;
+		err = err ?: enqueue_ltype(ltype_name2type(arg));
 		break;
 	case 'C':
-		if (!hascolor_name(arg))
-			exit(EXIT_FAILURE);
-		enqueue_lcolor(color_name2num(arg));
+		if (!lcolor_hasname(arg))
+			err = -EINVAL;
+		err = err ?: enqueue_lcolor(lcolor_name2num(arg));
 		break;
 	case 'x':
 		xlabel = arg;
@@ -185,31 +191,34 @@ static error_t parse_arg(int opt, char *arg, struct argp_state *state)
 		tmout_nsecs = str2nsecs(arg);
 		if (tmout_nsecs == 0) {
 			fprintf(stderr, "ERROR: bad -t value\n");
-			exit(EXIT_FAILURE);
+			err = -EINVAL;
 		}
 		break;
 	case ARG_LOGARITHMIC:
-		plot.v_scaling = NS_LOGARITHMIC;
-		break;
-	case ARG_EXPONENTIAL:
-		plot.v_scaling = NS_EXPONENTIAL;
+		curve_type = CURVE_TYPE_LOGARITHMIC;
 		break;
 	case ARG_LOGARITHMIC10:
-		plot.v_scaling = NS_LOGARITHMIC10;
+		curve_type = CURVE_TYPE_LOGARITHMIC10;
+		break;
+	case ARG_EXPONENTIAL:
+		curve_type = CURVE_TYPE_EXPONENTIAL;
+		break;
+	case ARG_DELTA:
+		curve_type = CURVE_TYPE_DELTA;
 		break;
 	case ARG_LINE_TYPES:
-		ldraw_print_names(stdout);
+		ltype_print_names(stdout);
 		exit(EXIT_SUCCESS);
 		break;
 	case ARG_LINE_COLORS:
-		color_print_names(stdout);
+		lcolor_print_names(stdout);
 		exit(EXIT_SUCCESS);
 		break;
 	case 'I':
 		interval_nsecs = str2nsecs(arg);
 		if (interval_nsecs == 0) {
 			fprintf(stderr, "ERROR: bad -I value\n");
-			exit(EXIT_FAILURE);
+			err = -EINVAL;
 		}
 		break;
 	case 'M':
@@ -235,7 +244,7 @@ static error_t parse_arg(int opt, char *arg, struct argp_state *state)
 	default:
 		return ARGP_ERR_UNKNOWN;
 	}
-	return 0;
+	return err;
 }
 
 static const struct argp argp = {
@@ -265,12 +274,13 @@ int main(int argc, char *argv[])
 
 	err = argp_parse(&argp, argc, argv, 0, NULL, NULL);
 	if (err) {
-		fprintf(stderr, "args parse failed %d\n", err);
-		return -err;
+		fprintf(stderr, "args parse failed %d, %s\n", err,
+			strerror(-err));
+		return err;
 	}
 
 	keyboard_init(&keyboard);
-	err = plot_init(&plot, &keyboard, file);
+	err = plot_init(&plot, &keyboard, file, verbose);
 	if (err) {
 		fprintf(stderr, "plot init failed, %s\n", strerror(-err));
 		return err;
@@ -308,6 +318,19 @@ int main(int argc, char *argv[])
 			exit(EXIT_FAILURE);
 		}
 		stdinfd = STDIN_FILENO;
+
+		/**
+		 * The data in stdin may be completely different from the data
+		 * in the file, so this is prohibited.
+		 *
+		 * TODO: Perhaps we could add a parameter, such as
+		 * `--allow-stdin-and-file`, to allow users to do so.
+		 */
+		if (file) {
+			fprintf(stderr,
+				"ERROR: not support stdin-input and file-input at the same time.\n");
+			exit(EXIT_FAILURE);
+		}
 	} else
 		keyfd = STDIN_FILENO;
 
@@ -319,12 +342,13 @@ int main(int argc, char *argv[])
 		FD_SET(stdinfd, &readfds);
 		if (maxfd < stdinfd)
 			maxfd = stdinfd;
-	} else if (!file) {
+	} else {
 		/**
-		 * Not create fresh timer if read data from file.
-		 *
 		 * Note: When we read data from stdin, we no longer need this
 		 * timer to trigger the update.
+		 *
+		 * TODO: Perhaps we should support allowing the drawing to
+		 * continue for stdin if plot/line information matched.
 		 */
 		freshtimerfd = new_timerfd(interval_nsecs);
 		FD_SET(freshtimerfd, &readfds);
@@ -358,16 +382,18 @@ int main(int argc, char *argv[])
 
 	init_flavor();
 
+	plot.curve_type = curve_type;
+
 	if (stdinfd == -1) {
 		if (!file && ram) {
-			plot.title = plot.title ?: (title ?: "Memory Usage");
-			plot.label_x = plot.label_x ?: (xlabel ?: "Time");
-			plot.label_y = plot.label_y ?: (ylabel ?: "Size(MB)");
+			set_plot_title(&plot, title ?: "Memory Usage");
+			set_plot_xlabel(&plot, xlabel ?: "Time");
+			set_plot_ylabel(&plot, ylabel ?: "Size(MB)");
 			plot_add_lgroup(&plot, &lg_ram, NULL);
 		} else if (!file) {
-			plot.title = plot.title ?: (title ?: "Loadavg");
-			plot.label_x = plot.label_x ?: (xlabel ?: "Time");
-			plot.label_y = plot.label_y ?: (ylabel ?: "Load");
+			set_plot_title(&plot, title ?: "Loadavg");
+			set_plot_xlabel(&plot, xlabel ?: "Time");
+			set_plot_ylabel(&plot, ylabel ?: "Load");
 			plot_add_lgroup(&plot, &lg_loadavg, NULL);
 		}
 	} else {
@@ -375,15 +401,15 @@ int main(int argc, char *argv[])
 			.nline = 1, /* at least one line */
 			.line_buff = stdin_buffer,
 		};
-		plot.title = plot.title ?: (title ?: "stdin");
-		plot.label_x = plot.label_x ?: (xlabel ?: "Time");
-		plot.label_y = plot.label_y ?: (ylabel ?: "Value");
+		set_plot_title(&plot, title ?: "stdin");
+		set_plot_xlabel(&plot, xlabel ?: "Time");
+		set_plot_ylabel(&plot, ylabel ?: "Value");
 		plot_add_lgroup(&plot, &lg_stdin, &stdarg);
 	}
 
-	/* Read from 'file' instead of create()/update() */
+	/* Read from 'file' instead of line group */
 	if (!file) {
-		plot_create_data(&plot);
+		plot_create_lines(&plot);
 		plot_update_data(&plot);
 	}
 	plot_update_size(&plot, true);
@@ -474,8 +500,6 @@ int main(int argc, char *argv[])
 				case 't': /* select numerical scaling type */
 					plot.kb->cnt.t++;
 					redraw = true;
-					plot.v_scaling =
-						(plot.v_scaling + 1) % NS_MAX;
 					break;
 				case 'h': /* help */
 					plot.kb->cnt.h++;
@@ -562,7 +586,7 @@ end:
 		fprintf(stderr, KEYBOARD_INF0_FMT "\n",
 			KEYBOARD_INF0_ARG(_p->kb));
 	}
-	save_plot(&plot, output_file_prefix);
+	save_plot(&plot, output_file_prefix, verbose);
 	if (output_file_prefix)
 		free(output_file_prefix);
 	return 0;

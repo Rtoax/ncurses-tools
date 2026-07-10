@@ -13,18 +13,19 @@
 /**
  * Scaling plotting values, different from @plotscaling.
  */
-enum numerical_scaling {
-	NS_NONE = 0,
-	NS_LOGARITHMIC,
-	NS_LOGARITHMIC10,
-	NS_EXPONENTIAL,
-	NS_MAX,
+enum curve_type {
+	CURVE_TYPE_NONE = 0,
+	CURVE_TYPE_LOGARITHMIC,
+	CURVE_TYPE_LOGARITHMIC10,
+	CURVE_TYPE_EXPONENTIAL,
+	CURVE_TYPE_DELTA,
+	CURVE_TYPE_MAX,
 };
 
 struct plot {
-	char *title;
-	char *label_x;
-	char *label_y;
+	char title[128];
+	char label_x[64];
+	char label_y[64];
 	/**
 	 * max indicates the maximum value your terminal has reached during the
 	 * entire program run (you can use the mouse to drag and adjust the
@@ -61,7 +62,7 @@ struct plot {
 	int lgcount;
 	unsigned long redrawcount;
 
-	enum numerical_scaling v_scaling;
+	enum curve_type curve_type;
 
 	struct keyboard *kb;
 
@@ -131,7 +132,31 @@ struct plot {
 		___p->plotshift * ___p->plotscaling;  \
 	})
 
-int plot_init(struct plot *p, struct keyboard *k, const char *file);
+static inline void set_plot_title(struct plot *p, const char *title)
+{
+	/* already set title */
+	if (p->title[0] != '\0')
+		return;
+	snprintf(p->title, sizeof(p->title) - 1, "%s", title);
+}
+
+static inline void set_plot_xlabel(struct plot *p, const char *label)
+{
+	/* already set x label */
+	if (p->label_x[0] != '\0')
+		return;
+	snprintf(p->label_x, sizeof(p->label_x) - 1, "%s", label);
+}
+
+static inline void set_plot_ylabel(struct plot *p, const char *label)
+{
+	/* already set y label */
+	if (p->label_y[0] != '\0')
+		return;
+	snprintf(p->label_y, sizeof(p->label_y) - 1, "%s", label);
+}
+
+int plot_init(struct plot *p, struct keyboard *k, const char *file, bool debug);
 unsigned long plot_mem_size(const struct plot *p);
 
 #define plot_warning(p, fmt...) __plot_warning(p, fmt)
@@ -141,13 +166,14 @@ int plot_add_lgroup(struct plot *p, struct lgroup *lg, void *lg_ops_arg);
 struct lgroup *plot_lgroup(const struct plot *p, int idx);
 
 void plot_update_size(struct plot *p, bool init);
-void plot_draw_axes(const struct plot *p);
-void plot_draw_title(const struct plot *p);
 
-void plot_create_data(struct plot *p);
+int plot_create_lines(struct plot *p);
 void plot_update_data(struct plot *p);
 void plot_help(const struct plot *p);
 void plot_llabel(const struct plot *p);
 void plot_redraw(struct plot *p, bool debug);
 
 void init_flavor(void);
+chtype getflavor(enum lcolor_enum color);
+
+void __plot_debug_llabel(const struct lgroup *lg, int height);

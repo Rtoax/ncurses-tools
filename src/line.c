@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: (LGPL-2.1 OR BSD-2-Clause)
 /* Copyright (C) 2026 Rong Tao */
 #include <assert.h>
+#include <errno.h>
 #include <float.h>
 #include <malloc.h>
 #include <math.h>
@@ -27,8 +28,21 @@ static int idx_lcolors = -1;
  */
 int enqueue_llabel(const char *name)
 {
+	if (!name)
+		return -EINVAL;
+
+	for (int i = 0; i < nr_llabels; i++) {
+		if (!strcmp(name, llabels[i])) {
+			fprintf(stderr,
+				"ERROR: line label '%s' already exist.\n",
+				name);
+			return -EEXIST;
+		}
+	}
+
 	nr_llabels++;
 	llabels = (char **)realloc(llabels, nr_llabels * sizeof(char *));
+
 	/* FIXME: memleak here */
 	llabels[nr_llabels - 1] = strdup(name);
 	return 0;
@@ -43,6 +57,9 @@ const char *dequeue_llabel(void)
 
 int enqueue_ltype(enum ltype_enum t)
 {
+	if (t >= LINE_TYPE_MAX || t < LINE_TYPE_DEFAULT)
+		return -EINVAL;
+
 	nr_ltypes++;
 	ltypes = (enum ltype_enum *)realloc(
 		ltypes, nr_ltypes * sizeof(enum ltype_enum));
@@ -64,6 +81,9 @@ enum ltype_enum dequeue_ltype(void)
 
 int enqueue_lcolor(enum lcolor_enum c)
 {
+	if (c >= C_MAX || c < C_GREEN)
+		return -EINVAL;
+
 	nr_lcolors++;
 	lcolors = (enum lcolor_enum *)realloc(
 		lcolors, nr_lcolors * sizeof(enum lcolor_enum));
@@ -86,7 +106,7 @@ enum lcolor_enum dequeue_lcolor(void)
 	return lcolors[++idx_lcolors];
 }
 
-enum lcolor_enum nextcolor(enum lcolor_enum c)
+enum lcolor_enum nextlcolor(enum lcolor_enum c)
 {
 	enum lcolor_enum color = dequeue_lcolor();
 	if (color != C_UNKNOWN)
@@ -100,7 +120,7 @@ const char *color_names[C_MAX] = {
 	[C_YELLOW] = "yellow",
 };
 
-int color_print_names(FILE *fp)
+int lcolor_print_names(FILE *fp)
 {
 	for (int i = 0; i < C_MAX; i++) {
 		fprintf(fp, "\t%s\n", color_names[i]);
@@ -111,7 +131,7 @@ int color_print_names(FILE *fp)
 /**
  * @return: return C_UNKNOWN if not found.
  */
-enum lcolor_enum color_name2num(const char *name)
+enum lcolor_enum lcolor_name2num(const char *name)
 {
 	for (int i = 0; i < C_MAX; i++)
 		if (!strncasecmp(color_names[i], name, strlen(name)))
@@ -120,13 +140,13 @@ enum lcolor_enum color_name2num(const char *name)
 	 * print error to stderr, hint to stdout.
 	 */
 	fprintf(stderr, "ERROR: not support color '%s', please use:\n", name);
-	color_print_names(stdout);
+	lcolor_print_names(stdout);
 	return C_UNKNOWN;
 }
 
-bool hascolor_name(const char *name)
+bool lcolor_hasname(const char *name)
 {
-	return color_name2num(name) != C_UNKNOWN;
+	return lcolor_name2num(name) != C_UNKNOWN;
 }
 
 static int dequeue_value_from_head(struct line *l)
@@ -213,44 +233,101 @@ double line_range_avg(struct line *l, int start, int len)
 		i++;
 		v = v->next;
 	}
-	assert(n != 0 && "line_range_max: not found values in range");
+	assert(n != 0 && "line_range_avg: not found values in range");
 	return sum / n;
 }
 
-double line_range_max(struct line *l, int start, int len)
+enum range_op {
+	RANGE_OP_MAX,
+	RANGE_OP_MIN,
+	RANGE_OP_DELTA_MAX, /* see delta_v() */
+	RANGE_OP_DELTA_MIN, /* see delta_v() */
+};
+
+static double __line_range_rslt(struct line *l, int start, int interval,
+				int len, enum range_op op)
 {
 	int i = 0;
-	double max = -DBL_MAX;
+	double rslt;
+
+	switch (op) {
+	case RANGE_OP_MAX:
+	case RANGE_OP_DELTA_MAX:
+		rslt = -DBL_MAX;
+		break;
+	case RANGE_OP_MIN:
+	case RANGE_OP_DELTA_MIN:
+		rslt = DBL_MAX;
+		break;
+	}
+
 	struct value *v = l->head;
+
 	if (start < 0)
 		start = 0;
+
 	while (v) {
 		if (i >= start && i < start + len) {
-			if (max < v->v)
-				max = v->v;
+			double delta = delta_v(v);
+			switch (op) {
+			case RANGE_OP_MAX:
+				if (rslt < v->v)
+					rslt = v->v;
+				break;
+			case RANGE_OP_MIN:
+				if (rslt > v->v)
+					rslt = v->v;
+				break;
+			case RANGE_OP_DELTA_MAX:
+				if (isnan(delta)) {
+					break;
+				}
+				if (rslt < delta)
+					rslt = delta;
+				break;
+			case RANGE_OP_DELTA_MIN:
+				if (isnan(delta)) {
+					break;
+				}
+				if (rslt > delta)
+					rslt = delta;
+				break;
+			}
 		}
-		i++;
-		v = v->next;
+		if (i < start) {
+			i++;
+			v = v->next;
+		} else {
+			for (int j = 0; j < interval; j++) {
+				v = v->next;
+				if (!v)
+					goto end_loop;
+			}
+			i += interval;
+		}
 	}
-	return max;
+end_loop:
+	return rslt;
 }
 
-double line_range_min(struct line *l, int start, int len)
+double line_range_max(struct line *l, int start, int interval, int len)
 {
-	int i = 0;
-	double min = DBL_MAX;
-	struct value *v = l->head;
-	if (start < 0)
-		start = 0;
-	while (v) {
-		if (i >= start && i < start + len) {
-			if (min > v->v)
-				min = v->v;
-		}
-		i++;
-		v = v->next;
-	}
-	return min;
+	return __line_range_rslt(l, start, interval, len, RANGE_OP_MAX);
+}
+
+double line_range_delta_max(struct line *l, int start, int interval, int len)
+{
+	return __line_range_rslt(l, start, interval, len, RANGE_OP_DELTA_MAX);
+}
+
+double line_range_min(struct line *l, int start, int interval, int len)
+{
+	return __line_range_rslt(l, start, interval, len, RANGE_OP_MIN);
+}
+
+double line_range_delta_min(struct line *l, int start, int interval, int len)
+{
+	return __line_range_rslt(l, start, interval, len, RANGE_OP_DELTA_MIN);
 }
 
 /**
@@ -279,49 +356,33 @@ static struct line *__create_line(const char *name, int color)
 
 	memset(new, 0, sizeof(struct line));
 
-	/* FIXME: memleak here */
-	new->name = arg_name ?: strdup(name);
+	set_line_name(new, arg_name ?: name);
 	new->color = color;
 
 	return new;
 }
 
-static int __lgroup_add_line(struct lgroup *lg, struct line *l)
-{
-	if (!lg->head) {
-		lg->head = l;
-		lg->count = 1;
-	} else {
-		lg->tail->next = l;
-		lg->count++;
-	}
-	lg->tail = l;
-	l->lg = lg;
-	return 0;
-}
-
+/**
+ * If the line is already exist in line group, return NULL.
+ */
 struct line *new_line_ops(struct lgroup *lg, const char *name, int color,
-			  const struct ldraw_ops *ops)
+			  const struct ltype_ops *ops)
 {
-	struct line *new = __create_line(name, color);
-	__lgroup_add_line(lg, new);
+	struct line *old, *new;
+
+	old = lgroup_get_line_from_name(lg, name);
+	if (old)
+		return NULL;
+
+	new = __create_line(name, color);
 	new->ops = ops;
-	new->id = lg->count;
+
+	lgroup_add_line(lg, new);
+
 	return new;
 }
 
 struct line *new_line(struct lgroup *lg, const char *name, int color)
 {
-	return new_line_ops(lg, name, color, ldraw_type2ops(dequeue_ltype()));
-}
-
-/* Get lgroup's line from index */
-struct line *lgroup_line(const struct lgroup *lg, int idx)
-{
-	for_each_line(lg, ln)
-	{
-		if (ln->id == idx)
-			return ln;
-	}
-	return NULL;
+	return new_line_ops(lg, name, color, ltype_type2ops(dequeue_ltype()));
 }

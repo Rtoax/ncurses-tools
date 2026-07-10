@@ -7,141 +7,144 @@
 #include "plot.h"
 #include "line.h"
 
-static void nothing(struct line *ln, int y, int x)
+static void nothing(const struct line *ln, int y, int x)
 {
 }
 
-static void nothing_v(struct line *ln, int y, int x, int n)
+static void nothing_v(const struct line *ln, int y, int x, int n)
 {
 }
 
-static void unicode_bold_horizon(struct line *ln, int y, int x)
+static void unicode_bold_horizon(const struct line *ln, int y, int x)
 {
 	mvprintw(y, x, U2501);
 }
 
-static void unicode_horizon(struct line *ln, int y, int x)
+static void unicode_horizon(const struct line *ln, int y, int x)
 {
 	mvprintw(y, x, U2500);
 }
 
-static void unicode_bold_horizon_dashed_line(struct line *ln, int y, int x)
+static void unicode_bold_horizon_dashed_line(const struct line *ln, int y,
+					     int x)
 {
 	if (x % 2)
 		mvprintw(y, x, U2501);
 }
 
-static void unicode_horizon_dashed_line(struct line *ln, int y, int x)
+static void unicode_horizon_dashed_line(const struct line *ln, int y, int x)
 {
 	if (x % 2)
 		mvprintw(y, x, U2500);
 }
 
-static void unicode_bold_vertical(struct line *ln, int y, int x, int n)
+static void unicode_bold_vertical(const struct line *ln, int y, int x, int n)
 {
 	cchar_t wch_vline = WCH_U2503;
 	mvvline_set(y, x, &wch_vline, n);
 }
 
-static void unicode_vertical(struct line *ln, int y, int x, int n)
+static void unicode_vertical(const struct line *ln, int y, int x, int n)
 {
 	cchar_t wch_vline = WCH_U2502;
 	mvvline_set(y, x, &wch_vline, n);
 }
 
-static void unicode_bold_vertical_dashed_line(struct line *ln, int y, int x,
-					      int n)
+static void unicode_bold_vertical_dashed_line(const struct line *ln, int y,
+					      int x, int n)
 {
 	cchar_t wch_vline = WCH_U2503;
 	for (int i = 0; i < n; i += 2)
 		mvvline_set(y + i, x, &wch_vline, 1);
 }
 
-static void unicode_vertical_dashed_line(struct line *ln, int y, int x, int n)
+static void unicode_vertical_dashed_line(const struct line *ln, int y, int x,
+					 int n)
 {
 	cchar_t wch_vline = WCH_U2502;
 	for (int i = 0; i < n; i += 2)
 		mvvline_set(y + i, x, &wch_vline, 1);
 }
 
-static void unicode_bold_ulcorner(struct line *ln, int y, int x)
+static void unicode_bold_ulcorner(const struct line *ln, int y, int x)
 {
 	mvprintw(y, x, U250F);
 }
 
-static void unicode_ulcorner(struct line *ln, int y, int x)
+static void unicode_ulcorner(const struct line *ln, int y, int x)
 {
 	mvprintw(y, x, U250C);
 }
 
-static void unicode_bold_llcorner(struct line *ln, int y, int x)
+static void unicode_bold_llcorner(const struct line *ln, int y, int x)
 {
 	mvprintw(y, x, U2517);
 }
 
-static void unicode_llcorner(struct line *ln, int y, int x)
+static void unicode_llcorner(const struct line *ln, int y, int x)
 {
 	mvprintw(y, x, U2514);
 }
 
-static void unicode_bold_urcorner(struct line *ln, int y, int x)
+static void unicode_bold_urcorner(const struct line *ln, int y, int x)
 {
 	mvprintw(y, x, U2513);
 }
 
-static void unicode_urcorner(struct line *ln, int y, int x)
+static void unicode_urcorner(const struct line *ln, int y, int x)
 {
 	mvprintw(y, x, U2510);
 }
 
-static void unicode_bold_lrcorner(struct line *ln, int y, int x)
+static void unicode_bold_lrcorner(const struct line *ln, int y, int x)
 {
 	mvprintw(y, x, U251B);
 }
 
-static void unicode_lrcorner(struct line *ln, int y, int x)
+static void unicode_lrcorner(const struct line *ln, int y, int x)
 {
 	mvprintw(y, x, U2518);
 }
 
-static void utf8_horizon(struct line *ln, int y, int x)
+static void utf8_horizon(const struct line *ln, int y, int x)
 {
 	mvprintw(y, x, "-");
 }
 
-static void utf8_vertical(struct line *ln, int y, int x, int n)
+static void utf8_vertical(const struct line *ln, int y, int x, int n)
 {
 	mvvline(y, x, '|', n);
 }
 
-static void utf8_cross(struct line *ln, int y, int x)
+static void utf8_cross(const struct line *ln, int y, int x)
 {
 	mvprintw(y, x, "+");
 }
 
-static void unicode_boldbold_horizon(struct line *ln, int y, int x)
+static void unicode_boldbold_horizon(const struct line *ln, int y, int x)
 {
 	mvprintw(y, x, U2584);
 }
 
-static void unicode_boldbold_vertical(struct line *ln, int y, int x, int n)
+static void unicode_boldbold_vertical(const struct line *ln, int y, int x,
+				      int n)
 {
 	cchar_t wch_vline = WCH_U2588;
 	mvvline_set(y, x, &wch_vline, n);
 }
 
-static void unicode_boldbold_corner1(struct line *ln, int y, int x)
+static void unicode_boldbold_corner1(const struct line *ln, int y, int x)
 {
 	mvprintw(y, x, U2584);
 }
 
-static void unicode_boldbold_corner2(struct line *ln, int y, int x)
+static void unicode_boldbold_corner2(const struct line *ln, int y, int x)
 {
 	cchar_t wch_vline = WCH_U2588;
 	mvvline_set(y, x, &wch_vline, 1);
 }
 
-static void unicode_area_chart_horizon(struct line *ln, int y, int x)
+static void unicode_area_chart_horizon(const struct line *ln, int y, int x)
 {
 	cchar_t wch_vline = WCH_U2588;
 	struct plot *p = ln->lg->plot;
@@ -149,18 +152,18 @@ static void unicode_area_chart_horizon(struct line *ln, int y, int x)
 	mvvline_set(y, x, &wch_vline, n);
 }
 
-static void unicode_heart(struct line *ln, int y, int x)
+static void unicode_heart(const struct line *ln, int y, int x)
 {
 	mvprintw(y, x, U2665);
 }
 
-static void unicode_heart_vertical(struct line *ln, int y, int x, int n)
+static void unicode_heart_vertical(const struct line *ln, int y, int x, int n)
 {
 	cchar_t wch_vline = WCH_U2665;
 	mvvline_set(y, x, &wch_vline, n);
 }
 
-const struct ldraw_ops unicode_heart_line_ops = {
+static const struct ltype_ops unicode_heart_line_ops = {
 	.name = "unicode-heart",
 	.horizon = unicode_heart,
 	.vertical = unicode_heart_vertical,
@@ -170,7 +173,7 @@ const struct ldraw_ops unicode_heart_line_ops = {
 	.lrcorner = unicode_heart,
 };
 
-const struct ldraw_ops unicode_boldbold_line_ops = {
+static const struct ltype_ops unicode_boldbold_line_ops = {
 	.name = "unicode-boldbold",
 	.horizon = unicode_boldbold_horizon,
 	.vertical = unicode_boldbold_vertical,
@@ -180,7 +183,7 @@ const struct ldraw_ops unicode_boldbold_line_ops = {
 	.lrcorner = unicode_boldbold_corner2,
 };
 
-const struct ldraw_ops unicode_bold_line_ops = {
+static const struct ltype_ops unicode_bold_line_ops = {
 	.name = "unicode-bold",
 	.horizon = unicode_bold_horizon,
 	.vertical = unicode_bold_vertical,
@@ -190,7 +193,7 @@ const struct ldraw_ops unicode_bold_line_ops = {
 	.lrcorner = unicode_bold_lrcorner,
 };
 
-const struct ldraw_ops unicode_bold_dashed_line_ops = {
+static const struct ltype_ops unicode_bold_dashed_line_ops = {
 	.name = "unicode-bold-dashed",
 	.horizon = unicode_bold_horizon_dashed_line,
 	.vertical = unicode_bold_vertical_dashed_line,
@@ -200,7 +203,7 @@ const struct ldraw_ops unicode_bold_dashed_line_ops = {
 	.lrcorner = unicode_bold_lrcorner,
 };
 
-const struct ldraw_ops unicode_line_ops = {
+static const struct ltype_ops unicode_line_ops = {
 	.name = "unicode",
 	.horizon = unicode_horizon,
 	.vertical = unicode_vertical,
@@ -210,7 +213,7 @@ const struct ldraw_ops unicode_line_ops = {
 	.lrcorner = unicode_lrcorner,
 };
 
-const struct ldraw_ops unicode_dashed_line_ops = {
+static const struct ltype_ops unicode_dashed_line_ops = {
 	.name = "unicode-dashed",
 	.horizon = unicode_horizon_dashed_line,
 	.vertical = unicode_vertical_dashed_line,
@@ -220,7 +223,7 @@ const struct ldraw_ops unicode_dashed_line_ops = {
 	.lrcorner = unicode_lrcorner,
 };
 
-const struct ldraw_ops unicode_area_chart_ops = {
+static const struct ltype_ops unicode_area_chart_ops = {
 	.name = "unicode-area-chart",
 	.horizon = unicode_area_chart_horizon,
 	.vertical = nothing_v,
@@ -230,7 +233,7 @@ const struct ldraw_ops unicode_area_chart_ops = {
 	.lrcorner = nothing,
 };
 
-const struct ldraw_ops utf8_line_ops = {
+static const struct ltype_ops utf8_line_ops = {
 	.name = "utf8",
 	.horizon = utf8_horizon,
 	.vertical = utf8_vertical,
@@ -240,7 +243,7 @@ const struct ldraw_ops utf8_line_ops = {
 	.lrcorner = utf8_cross,
 };
 
-const struct ldraw_ops *ldraw_operations[LINE_TYPE_MAX] = {
+static const struct ltype_ops *ltype_operations[LINE_TYPE_MAX] = {
 	[LINE_TYPE_BOLD_UNICODE] = &unicode_bold_line_ops,
 	[LINE_TYPE_BOLD_UNICODE_DASHED] = &unicode_bold_dashed_line_ops,
 	[LINE_TYPE_BOLDBOLD_UNICODE] = &unicode_boldbold_line_ops,
@@ -251,49 +254,49 @@ const struct ldraw_ops *ldraw_operations[LINE_TYPE_MAX] = {
 	[LINE_TYPE_HEART_UNICODE] = &unicode_heart_line_ops,
 };
 
-int ldraw_print_names(FILE *fp)
+int ltype_print_names(FILE *fp)
 {
 	for (int i = LINE_TYPE_DEFAULT; i < LINE_TYPE_MAX; i++) {
-		fprintf(fp, "\t%s\n", ldraw_operations[i]->name);
+		fprintf(fp, "\t%s\n", ltype_operations[i]->name);
 	}
 	return 0;
 }
 
-bool ldraw_hasname(const char *name)
+bool ltype_hasname(const char *name)
 {
 	for (int i = LINE_TYPE_DEFAULT; i < LINE_TYPE_MAX; i++)
-		if (!strcmp(ldraw_operations[i]->name, name))
+		if (!strcmp(ltype_operations[i]->name, name))
 			return true;
 	/**
 	 * print error to stderr, hint to stdout.
 	 */
 	fprintf(stderr, "ERROR: not support line type '%s', please use:\n",
 		name);
-	ldraw_print_names(stdout);
+	ltype_print_names(stdout);
 	return false;
 }
 
-enum ltype_enum ldraw_name2type(const char *name)
+enum ltype_enum ltype_name2type(const char *name)
 {
 	for (int i = LINE_TYPE_DEFAULT; i < LINE_TYPE_MAX; i++)
-		if (!strcmp(ldraw_operations[i]->name, name))
+		if (!strcmp(ltype_operations[i]->name, name))
 			return i;
 	return LINE_TYPE_DEFAULT;
 }
 
-const struct ldraw_ops *ldraw_type2ops(enum ltype_enum t)
+const struct ltype_ops *ltype_type2ops(enum ltype_enum t)
 {
 	if (t < LINE_TYPE_DEFAULT || t >= LINE_TYPE_MAX)
 		t = LINE_TYPE_DEFAULT;
-	return ldraw_operations[t];
+	return ltype_operations[t];
 }
 
-const struct ldraw_ops *ldraw_name2ops(const char *name)
+const struct ltype_ops *ltype_name2ops(const char *name)
 {
-	return ldraw_type2ops(ldraw_name2type(name));
+	return ltype_type2ops(ltype_name2type(name));
 }
 
-const char *ldraw_type2name(enum ltype_enum t)
+const char *ltype_type2name(enum ltype_enum t)
 {
-	return ldraw_type2ops(t)->name;
+	return ltype_type2ops(t)->name;
 }
