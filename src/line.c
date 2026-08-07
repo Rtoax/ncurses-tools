@@ -175,6 +175,14 @@ static int dequeue_value_from_head(struct line *l)
 	l->count--;
 	struct value *head = l->head;
 	l->head = head->next;
+
+	/* refresh x axis start time value */
+	if (l->head) {
+		l->x_axis_range.start = l->head->x_axis.tv;
+	} else {
+		memset(&l->x_axis_range.start, 0, sizeof(struct timeval));
+	}
+
 	free(head);
 	return v;
 }
@@ -188,9 +196,16 @@ static int enqueue_value_to_tail(struct line *l, double v, struct timeval *tv)
 	new->log10_v = signed_log10_trans(v);
 	new->exp_v = exp(v);
 	if (tv)
-		memcpy(&new->tv, tv, sizeof(struct timeval));
+		memcpy(&new->x_axis.tv, tv, sizeof(struct timeval));
 	else
-		gettimeofday(&new->tv, NULL);
+		gettimeofday(&new->x_axis.tv, NULL);
+
+	/* set newest time value */
+	l->x_axis_range.end = new->x_axis.tv;
+	if (l->count == 0) {
+		l->x_axis_range.start = new->x_axis.tv;
+	}
+
 	new->next = NULL;
 
 	if (!l->head) {

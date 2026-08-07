@@ -260,9 +260,9 @@ static void __paint_line(struct plot *p, const struct lgroup *lg,
 
 		/* set x axis */
 		if ((ivs - 1) % 10 == 0) {
-			char buf[10];
-			strftime(buf, 10, "%T", localtime(&v->tv.tv_sec));
-			mvprintw(p->height - p->bnd.bottom + 1, w, "%s", buf);
+			char buf[32];
+			mvprintw(p->height - p->bnd.bottom + 1, w, "%s",
+				 timeval_str(&v->x_axis.tv, buf));
 		}
 
 		/* set y axis */
@@ -411,11 +411,15 @@ void __plot_debug_llabel(const struct lgroup *lg, int height)
 		if (ln->count <= 0)
 			mvprintw(i + height, p->bnd.left + 1, "%d: %s: %ld",
 				 ln->id, ln->name, ln->count);
-		else
+		else {
+			char buf[64];
+
 			mvprintw(i + height, p->bnd.left + 1,
-				 "%d: %s: %ld %f - %lf~%lf", ln->id, ln->name,
-				 ln->count, ln->tail->v, ln->min->v,
-				 ln->max->v);
+				 "%d: %s: %ld %f x(%s) y(%lf~%lf)", ln->id,
+				 ln->name, ln->count, ln->tail->v,
+				 x_axis_range_str(&ln->x_axis_range, buf),
+				 ln->min->v, ln->max->v);
+		}
 		attroff(color);
 		i++;
 	}

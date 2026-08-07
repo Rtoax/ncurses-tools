@@ -4,4 +4,4 @@ LDFLAGS += $(shell pkg-config --libs ncursesw json-c)
 LDFLAGS += -lm
 
 plotcake: plotcake.o loadavg.o plot.o ram.o stdin.o line.o ltypes.o keyboard.o \
-	file.o utils.o lgroup.o
+	file.o utils.o lgroup.o axis.o
