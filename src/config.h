@@ -2,7 +2,7 @@
 /* Copyright (C) 2026 Rong Tao */
 #pragma once
 
-#define MY_VERSION "v1.6.15"
+#define MY_VERSION "v1.6.22"
 #define GIT_REPO "github.com/rtoax/plotcake"
 
 #define KEY_HELP_h "'h': show the help info"
@@ -50,20 +50,13 @@ extern const char *color_names[C_MAX];
 #define BND_LEFT 7
 #define BND_RIGHT 6
 
-/* TODO: support more line type */
-#ifdef NOACS
 #define T_HLINE '-'
 #define T_VLINE '|'
 #define T_LLCR 'L'
+#define T_LARR '<'
 #define T_RARR '>'
 #define T_UARR '^'
-#else
-#define T_HLINE ACS_HLINE
-#define T_VLINE ACS_VLINE
-#define T_LLCR ACS_LLCORNER
-#define T_RARR ACS_RARROW
-#define T_UARR ACS_UARROW
-#endif
+#define T_DARR '`'
 
 #define U2500 "─"
 #define U2502 "│"
@@ -71,6 +64,8 @@ extern const char *color_names[C_MAX];
 #define U2510 "┐"
 #define U2514 "└"
 #define U2518 "┘"
+#define U2191 "↑"
+#define U2192 "→"
 
 #define W_U2502 L"│"
 
