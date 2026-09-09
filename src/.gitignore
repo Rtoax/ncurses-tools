@@ -1,4 +1,6 @@
-*.dat
+/build
 *.o
+*.json
 *.txt
+!CMakeLists.txt
 /plotcake
